@@ -1,0 +1,11 @@
+Defaulting to user installation because normal site-packages is not writeable
+Collecting plotly
+  Downloading plotly-6.5.0-py3-none-any.whl.metadata (8.5 kB)
+Collecting narwhals>=1.15.1 (from plotly)
+  Downloading narwhals-2.14.0-py3-none-any.whl.metadata (13 kB)
+Requirement already satisfied: packaging in c:\users\alpca\appdata\roaming\python\python313\site-packages (from plotly) (25.0)
+Downloading plotly-6.5.0-py3-none-any.whl (9.9 MB)
+   ---------------------------------------- 9.9/9.9 MB 6.8 MB/s eta 0:00:00
+Downloading narwhals-2.14.0-py3-none-any.whl (430 kB)
+Installing collected packages: narwhals, plotly
+Successfully installed narwhals-2.14.0 plotly-6.5.0

@@ -149,18 +149,18 @@ class Backtester:
         Update all open positions: check TP, SL, bias change
         """
         for position in self.open_positions[:]:  # Copy to avoid modification issues
-            
+
             # 1. Check individual TP
             if position.check_tp_hit(candle):
                 self.close_position(position, candle['time'], position.tp_price, 'TP_HIT')
                 continue
-            
+
             # 2. Check if bias changed (opposite to position direction)
             if (position.direction == 'LONG' and current_bias == 'SHORT') or \
                (position.direction == 'SHORT' and current_bias == 'LONG'):
                 self.close_position(position, candle['time'], candle['close'], 'BIAS_CHANGE')
                 continue
-            
+
             # 3. Check SL (mitigation break - body close)
             if position.check_sl_hit(candle, mitigation_high, mitigation_low):
                 self.close_position(position, candle['time'], candle['close'], 'SL_HIT')
@@ -237,48 +237,62 @@ def run_backtest(df, symbol, initial_balance, strategy_params):
     # Create backtester
     backtester = Backtester(initial_balance, symbol)
     
-    # Initialize bias
-    strategy.initialize_bias(df, start_idx=60)
-    print(f"\nInitial Bias: {strategy.bias}")
-    print(f"  Mitigation HIGH: {strategy.mitigation_high:.5f}")
-    print(f"  Mitigation LOW: {strategy.mitigation_low:.5f}")
-    print(f"  Reference HIGH: {strategy.reference_high:.5f}")
-    print(f"  Reference LOW: {strategy.reference_low:.5f}")
-    
     # Main backtest loop
     print("\nRunning backtest...")
-    
-    for i in range(60, len(df)):
+
+    for i in range(0, len(df)):
         candle = df.iloc[i]
-        
-        # Update mitigation
-        strategy.update_mitigation(df, i)
-        
+
+        # Check for daily reset
+        if strategy.check_daily_reset(candle['time']):
+            # Close all positions at start of new day
+            if backtester.open_positions:
+                backtester.close_all_positions(candle['time'], candle['close'], 'DAILY_RESET')
+
+        # Check if we should close all positions (20:00)
+        if strategy.should_close_all_positions(candle['time']):
+            if backtester.open_positions:
+                backtester.close_all_positions(candle['time'], candle['close'], 'END_OF_DAY')
+
+        # Check if news time - close all positions
+        if strategy.enable_news_filter and strategy.news_filter:
+            is_news, event = strategy.news_filter.is_news_time(candle['time'])
+            if is_news and backtester.open_positions:
+                backtester.close_all_positions(candle['time'], candle['close'], f'NEWS_{event}')
+
+        # Update swing levels
+        strategy.update_swing_levels(df, i)
+
         # Check for bias change
         bias_changed = strategy.check_bias_change(df, i)
-        
+
         # Update all open positions (TP, SL, bias change)
         backtester.update_positions(
-            candle, 
-            strategy.bias, 
-            strategy.mitigation_high, 
+            candle,
+            strategy.bias,
+            strategy.mitigation_high,
             strategy.mitigation_low
         )
-        
-        # Entry logic: during trading hours, if candle aligns with bias
+
+        # Entry logic: during trading hours, if mitigation is set, and NOT high volatility
         if strategy.is_trading_hours(candle['time']) and strategy.should_enter(candle):
-            entry_price = strategy.get_entry_price(candle)
-            lot_size = strategy.calculate_position_size(backtester.balance, entry_price, symbol)
-            
-            if lot_size > 0:
-                backtester.open_position(
-                    entry_time=candle['time'],
-                    entry_price=entry_price,
-                    direction=strategy.bias,
-                    lot_size=lot_size,
-                    sl_price=strategy.get_sl_price(),
-                    tp_pips=strategy.individual_tp_pips
-                )
+            # Check volatility filter
+            if strategy.is_high_volatility(df, i):
+                continue  # Skip entry during high volatility
+
+            if strategy.mitigation_high is not None and strategy.mitigation_low is not None:
+                entry_price = strategy.get_entry_price(candle)
+                lot_size = strategy.calculate_position_size(backtester.balance, entry_price, symbol)
+
+                if lot_size > 0:
+                    backtester.open_position(
+                        entry_time=candle['time'],
+                        entry_price=entry_price,
+                        direction=strategy.bias,
+                        lot_size=lot_size,
+                        sl_price=strategy.get_sl_price(),
+                        tp_pips=strategy.individual_tp_pips
+                    )
         
         # Track equity
         if i % 1000 == 0:
@@ -337,8 +351,15 @@ if __name__ == "__main__":
         'risk_per_trade': RISK_PER_TRADE,
         'emergency_sl_percent': EMERGENCY_SL_PERCENT,
         'trading_hours': TRADING_HOURS,
+        'analysis_hours': ANALYSIS_HOURS,
         'min_mitigation_distance_pips': MIN_MITIGATION_DISTANCE_PIPS,
-        'lookback_for_high_low': 20  # Last 20 candles for reference high/low
+        'swing_lookback': SWING_LOOKBACK,
+        'enable_news_filter': ENABLE_NEWS_FILTER,
+        'news_buffer_before': NEWS_BEFORE_MINUTES,
+        'news_buffer_after': NEWS_AFTER_MINUTES,
+        'enable_volatility_filter': ENABLE_VOLATILITY_FILTER,
+        'atr_period': ATR_PERIOD,
+        'atr_multiplier': ATR_MULTIPLIER
     }
     
     # Run backtest
